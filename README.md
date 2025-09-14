@@ -10,4 +10,5 @@ and
 
 No artificer's tool of AI was employed in this making, and thine own eyes can see the work is most passing strange. 'Tis but a rough-hewn prototype, and shall be burnished to a finer finish... never, most like.
 
-Install a great many packages whose names we shall keep close. HeeHeeHaw.
+Install a great many packages whose names we shall keep close. HeeHeeHeeHaw.
+Note:"Games" are not part of the project but Joshua included them anyways.
