@@ -1,3 +1,4 @@
+Credits:Joshua Wan-Final Project,Machine Learning,Probably everything.Sineth Dias-Editorial and Debugging.Ethan Xu-Script Writer.Vihaan Shukla-Presentation.
 This is the hackathon group 67 project.For the machine learning code you need to enter these two commands inside windows CMD:python -m spacy download en_core_web_sm,and pip install numpy spacy scikit-learn,and a  bunch of other commands that will be released probably never.There were no AI tools used,and you can tell it is already very messy.This is a protype only and will be polished probably never.Install a bunch of packages that we will not disclose.HeeHeeHaw.
 If you only speak old english:
 Hark! This scroll doth pertain to the endeavour of hackathon fellowship, Group Seven and Sixty.
