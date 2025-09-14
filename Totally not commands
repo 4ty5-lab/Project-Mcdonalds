@@ -1,4 +1,6 @@
 save thy file as nlp_organizer.py
+cd %USERPROFILE%\Downloads
+Run this:python nlp_organizer.py.py demo
 # ==============================================
 # INSTALLATION COMMANDS (Run these first)
 # ==============================================
