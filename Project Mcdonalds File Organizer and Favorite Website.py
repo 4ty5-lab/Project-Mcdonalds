@@ -10,7 +10,6 @@ from datetime import datetime, timedelta
 import hashlib
 from collections import defaultdict
 
-# Load spaCy model with error handling
 try:
     nlp = spacy.load("en_core_web_sm", disable=["parser", "ner"])
 except OSError:
