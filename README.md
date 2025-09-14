@@ -1,0 +1,1 @@
+This is the hackathon group 67 projectg.For the machine learning code you need to enter these two commands inside windows CMD:python -m spacy download en_core_web_sm,and pip install numpy spacy scikit-learn
