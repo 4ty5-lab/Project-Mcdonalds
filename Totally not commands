@@ -1,0 +1,89 @@
+save thy file as nlp_organizer.py
+# ==============================================
+# INSTALLATION COMMANDS (Run these first)
+# ==============================================
+
+ Install required dependencies
+pip install scikit-learn numpy
+
+ Install optional but recommended NLP library
+pip install spacy
+python -m spacy download en_core_web_sm
+
+# ==============================================
+# FILE ORGANIZATION COMMANDS
+# ==============================================
+
+# Organize files in a directory (preview only)
+python nlp_organizer.py organize /path/to/your/files
+
+# Actually move files to organized categories
+python nlp_organizer.py organize /path/to/your/files --no-dry-run
+
+# Organize files to a specific target directory
+python nlp_organizer.py organize /path/to/source/files --target-dir /path/to/target/directory
+
+# Train the ML model with categorized files (place files in category subfolders)
+python nlp_organizer.py train /path/to/training/files
+
+
+# ==============================================
+# TAB MANAGEMENT COMMANDS
+# ==============================================
+
+# Search through open browser tabs using natural language
+python nlp_organizer.py search-tabs "your search query"
+
+# Search tabs with custom result limit
+python nlp_organizer.py search-tabs "query" --limit 10
+
+# List all currently open tabs
+python nlp_organizer.py list-tabs
+
+# Find tabs inactive for more than 30 minutes (default)
+python nlp_organizer.py inactive-tabs
+
+# Find tabs inactive for custom time (in minutes)
+python nlp_organizer.py inactive-tabs --minutes 60
+
+# Close a specific tab by its ID number
+python nlp_organizer.py close-tab TAB_ID_NUMBER
+
+
+# ==============================================
+# BOOKMARK/FAVORITE MANAGEMENT COMMANDS
+# ==============================================
+
+# Add a new bookmark (favorite)
+python nlp_organizer.py add-favorite "https://example.com" "Website Title"
+
+# Add bookmark with specific category
+python nlp_organizer.py add-favorite "https://example.com" "Website Title" --category "programming"
+
+# Remove a bookmark by URL
+python nlp_organizer.py remove-favorite "https://example.com"
+
+# Search bookmarks using natural language
+python nlp_organizer.py search-favorites "search query"
+
+# Search bookmarks within a specific category
+python nlp_organizer.py search-favorites "python" --category "programming"
+
+# List all bookmarks
+python nlp_organizer.py list-favorites
+
+# List bookmarks from a specific category
+python nlp_organizer.py list-favorites --category "programming"
+
+
+# ==============================================
+# UTILITY COMMANDS
+# ==============================================
+
+# Show statistics about files and web data
+python nlp_organizer.py stats
+
+# Run a demonstration of all features
+python nlp_organizer.py demo
+
+
