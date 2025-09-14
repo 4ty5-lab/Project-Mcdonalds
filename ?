@@ -1,0 +1,3 @@
+pip install scikit-learn numpy
+pip install numpy scikit-learn spacy psutil keyboard pygame pywin32
+python -m spacy download en_core_web_sm
