@@ -1,3 +1,12 @@
 def main():
-	# Main program
+	i = int(input("What is the height of the pyramid"))
+	j = 1
+	k = j
+	while i > 0:
+		while j > 0
+			print("#")
+			j = j - 1
+		print("")
+		k = k + 1
+		j = k
 main()
