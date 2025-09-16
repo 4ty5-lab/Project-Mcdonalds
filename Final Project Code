@@ -7,3 +7,31 @@ import shutil
 from collections import defaultdict
 from datetime import datetime, timedelta
 
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.preprocessing import LabelEncoder
+
+try:
+    import spacy
+    SPACY_AVAILABLE = True
+except ImportError:
+    SPACY_AVAILABLE = False
+
+MODEL_DIR_NAME = ".nlp_file_organizer_v3"
+WEB_DATA_FILENAME = "web_favorites_data.pkl"
+IGNORED_EXTENSIONS = {'.tmp', '.bak', '.swp', '.DS_Store', '.log'}
+TEXT_EXTS = {'.txt', '.md', '.py', '.js', '.html', '.css', '.csv', '.json'}
+
+class TextProcessor:
+    def __init__(self, use_spacy=False):
+        self.stop_words = {'the', 'and', 'or', 'in', 'on', 'at', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'this', 'that', 'i', 'you', 'it', 'for', 'of', 'with'}
+        self.punct_re = re.compile(r'[^\w\s]')
+        self.nlp = None
+
+        if use_spacy and SPACY_AVAILABLE:
+            try:
+                self.nlp = spacy.load("en_core_web_sm", disable=["parser", "ner"])
+            except OSError:
+                print("Warning: spaCy model not found, falling back to basic text processing.")
+                use_spacy = False
+        self.use_spacy_nlp = use_spacy 
