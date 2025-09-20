@@ -34,4 +34,400 @@ class TextProcessor:
             except OSError:
                 print("Warning: spaCy model not found, falling back to basic text processing.")
                 use_spacy = False
-        self.use_spacy_nlp = use_spacy 
+        self.use_spacy_nlp = use_spacy
+
+    def clean_text(self, text):
+        if not text:
+            return ""
+        
+        text = text.lower()
+        text = self.punct_re.sub(' ', text)
+
+        if self.nlp and self.use_spacy_nlp:
+            try:
+                doc = self.nlp(text)
+                return ' '.join([token.lemma_ for token in doc if token.lemma_ not in self.stop_words and len(token.lemma_) > 1])
+            except Exception:
+                return self._fallback_clean(text)
+        
+        return self._fallback_clean(text)
+
+    def _fallback_clean(self, text):
+        words = text.split()
+        return ' '.join([w for w in words if w not in self.stop_words and len(w) > 2])
+
+class FileOrganizer:
+    def __init__(self, model_path=None):
+        self.model_dir = model_path or os.path.join(os.path.expanduser("~"), MODEL_DIR_NAME)
+        self.text_proc = TextProcessor(SPACY_AVAILABLE)
+        self.vectorizer = TfidfVectorizer(max_features=1200, ngram_range=(1, 2))
+        self.classifier = GradientBoostingClassifier(n_estimators=75, random_state=42)
+        self.label_encoder = LabelEncoder()
+        self.category_stats = defaultdict(int)
+        
+        self.ext_categories = {
+            'txt': 'documents', 'doc': 'documents', 'docx': 'documents', 'pdf': 'documents', 'rtf': 'documents',
+            'jpg': 'images', 'jpeg': 'images', 'png': 'images', 'gif': 'images', 'bmp': 'images', 'svg': 'images',
+            'mp4': 'videos', 'avi': 'videos', 'mov': 'videos', 'mkv': 'videos',
+            'mp3': 'audio', 'wav': 'audio', 'flac': 'audio', 'aac': 'audio',
+            'zip': 'archives', 'rar': 'archives', '7z': 'archives', 'tar': 'archives', 'gz': 'archives',
+            'py': 'code', 'js': 'code', 'html': 'code', 'css': 'code', 'java': 'code',
+            'exe': 'executables', 'msi': 'executables',
+            'xls': 'spreadsheets', 'xlsx': 'spreadsheets', 'csv': 'spreadsheets'
+        }
+        
+        os.makedirs(self.model_dir, exist_ok=True)
+        self._load_model_state()
+
+    def _load_model_state(self):
+        model_files = {'vectorizer.pkl': 'vectorizer', 'classifier.pkl': 'classifier', 'labels.pkl': 'label_encoder', 'stats.pkl': 'category_stats'}
+        for filename, attr in model_files.items():
+            path = os.path.join(self.model_dir, filename)
+            if os.path.exists(path):
+                try:
+                    with open(path, 'rb') as f:
+                        setattr(self, attr, pickle.load(f))
+                except Exception as e:
+                    print(f"Warning: Could not load model component {filename}: {e}")
+
+    def _save_model_state(self):
+        model_components = {'vectorizer.pkl': self.vectorizer, 'classifier.pkl': self.classifier, 'labels.pkl': self.label_encoder, 'stats.pkl': self.category_stats}
+        for filename, component in model_components.items():
+            path = os.path.join(self.model_dir, filename)
+            try:
+                with open(path, 'wb') as f: pickle.dump(component, f)
+            except Exception as e:
+                print(f"Error saving model component {filename}: {e}")
+
+    def get_file_text_features(self, file_path):
+        name = os.path.basename(file_path)
+        ext = os.path.splitext(name)[1].lower()
+        if ext in IGNORED_EXTENSIONS:
+            return ""
+
+        feature_parts = [name, ext, os.path.basename(os.path.dirname(file_path))]
+        
+        try:
+            size = os.path.getsize(file_path)
+            if size < 1024: size_cat = "tiny"
+            elif size < 1024*1024: size_cat = "small"
+            else: size_cat = "large"
+            feature_parts.append(size_cat)
+        except OSError:
+            pass
+
+        if ext in TEXT_EXTS:
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    feature_parts.append(f.read(2000))
+            except Exception:
+                pass
+        
+        return self.text_proc.clean_text(' '.join(feature_parts))
+
+    def run_training(self, training_dir):
+        file_paths, categories = [], []
+        for cat_name in os.listdir(training_dir):
+            cat_path = os.path.join(training_dir, cat_name)
+            if os.path.isdir(cat_path):
+                for item_name in os.listdir(cat_path):
+                    item_path = os.path.join(cat_path, item_name)
+                    if os.path.isfile(item_path):
+                        file_paths.append(item_path)
+                        categories.append(cat_name)
+
+        if len(set(categories)) < 2:
+            print("Error: Training requires at least two subdirectories with files.")
+            return
+
+        print(f"Found {len(file_paths)} files for training...")
+        feature_texts = [self.get_file_text_features(p) for p in file_paths]
+        
+        X = self.vectorizer.fit_transform(feature_texts)
+        y = self.label_encoder.fit_transform(categories)
+        self.classifier.fit(X, y)
+        
+        for cat in categories: self.category_stats[cat] += 1
+        self._save_model_state()
+        print(f"Training complete. On-set accuracy: {self.classifier.score(X, y):.2f}")
+
+    def classify_files(self, file_paths):
+        if not hasattr(self.classifier, 'classes_'):
+            return [self.ext_categories.get(os.path.splitext(fp)[1].lower().lstrip('.'), 'other') for fp in file_paths]
+
+        feature_texts = [self.get_file_text_features(p) for p in file_paths]
+        X = self.vectorizer.transform(feature_texts)
+        predictions = self.classifier.predict(X)
+        return self.label_encoder.inverse_transform(predictions)
+
+    def do_organization(self, source_dir, target_dir, dry_run=True):
+        files = [os.path.join(source_dir, f) for f in os.listdir(source_dir) if os.path.isfile(os.path.join(source_dir, f))]
+        if not files:
+            print("No files to organize in source directory.")
+            return
+
+        categories = self.classify_files(files)
+        move_plan = defaultdict(list)
+        for path, cat in zip(files, categories):
+            if 'draft' in os.path.basename(path).lower():
+                move_plan['drafts'].append(path)
+            else:
+                move_plan[cat].append(path)
+
+        for cat, file_list in move_plan.items():
+            print(f"\nCategory '{cat.upper()}' ({len(file_list)} files)")
+            for f in file_list[:5]: print(f"  - {os.path.basename(f)}")
+            if len(file_list) > 5: print(f"  ...and {len(file_list) - 5} more")
+
+        if dry_run:
+            print("\nThis was a dry run. No files were moved.")
+            return
+
+        moved_count = 0
+        for cat, file_list in move_plan.items():
+            cat_dir = os.path.join(target_dir, cat)
+            os.makedirs(cat_dir, exist_ok=True)
+            for file_path in file_list:
+                try:
+                    dest_path = self.find_available_path(cat_dir, os.path.basename(file_path))
+                    shutil.move(file_path, dest_path)
+                    moved_count += 1
+                except Exception as e:
+                    print(f"Could not move {os.path.basename(file_path)}: {e}")
+        print(f"\nSuccessfully moved {moved_count} files.")
+    
+    def find_available_path(self, target_dir, filename):
+        base, ext = os.path.splitext(filename)
+        counter = 1
+        dest_path = os.path.join(target_dir, filename)
+        while os.path.exists(dest_path):
+            dest_path = os.path.join(target_dir, f"{base}_{counter}{ext}")
+            counter += 1
+        return dest_path
+
+    def get_category_stats(self):
+        return dict(self.category_stats)
+
+class WebDataManager:
+    def __init__(self, data_file=None):
+        self.dataFile = data_file or WEB_DATA_FILENAME
+        self.textProcessor = TextProcessor(SPACY_AVAILABLE)
+        self.tabs = {}
+        self.favorites = {}
+        self.tab_id_counter = 0
+        self.load()
+
+    def load(self):
+        if os.path.exists(self.dataFile):
+            with open(self.dataFile, 'rb') as f:
+                data = pickle.load(f)
+                self.favorites = data.get('favorites', {})
+                self.tabs = data.get('tabs', {})
+                self.tab_id_counter = data.get('tab_id_counter', 0)
+
+    def save(self):
+        if os.path.exists(self.dataFile):
+            backup_path = f"{self.dataFile}.{datetime.now().strftime('%Y%m%d%H%M%S')}.bak"
+            shutil.copy(self.dataFile, backup_path)
+        data_to_save = {'favorites': self.favorites, 'tabs': self.tabs, 'tab_id_counter': self.tab_id_counter}
+        with open(self.dataFile, 'wb') as f:
+            pickle.dump(data_to_save, f)
+
+    def add_tab(self, url, title):
+        self.tab_id_counter += 1
+        tab_id = self.tab_id_counter
+        self.tabs[tab_id] = {
+            'url': url, 'title': title, 'created': datetime.now(),
+            'last_active': datetime.now(), 'visit_count': 1,
+            'clean_title': self.textProcessor.clean_text(title)
+        }
+        self.save()
+        return tab_id
+
+    def close_tab(self, tab_id):
+        if tab_id in self.tabs:
+            del self.tabs[tab_id]
+            self.save()
+            return True
+        return False
+    
+    def find_inactive_tabs(self, threshold_minutes=30):
+        inactive = []
+        now = datetime.now()
+        threshold = timedelta(minutes=threshold_minutes)
+        for tab_id, tab in self.tabs.items():
+            if now - tab.get('last_active', now) > threshold:
+                inactive.append({'id': tab_id, **tab})
+        return inactive
+
+    def search_tabs(self, query):
+        if not (self.textProcessor.nlp and self.textProcessor.use_spacy_nlp):
+            print("Warning: spaCy not available for advanced tab search.")
+            return []
+        query_doc = self.textProcessor.nlp(self.textProcessor.clean_text(query))
+        results = []
+        for tab_id, tab_data in self.tabs.items():
+            tab_doc = self.textProcessor.nlp(tab_data['clean_title'])
+            similarity = query_doc.similarity(tab_doc)
+            if similarity > 0.4:
+                results.append({'id': tab_id, **tab_data, 'score': similarity})
+        return sorted(results, key=lambda x: x['score'], reverse=True)
+
+    def add_favorite(self, url, title, category="general"):
+        url_hash = hashlib.md5(url.encode()).hexdigest()
+        self.favorites[url_hash] = {
+            'url': url, 'title': title, 'category': category, 'added': datetime.now(),
+            'last_accessed': datetime.now(), 'access_count': 1
+        }
+        self.save()
+        print(f"Added '{title}' to favorites.")
+
+    def remove_favorite(self, url):
+        url_hash = hashlib.mdS5(url.encode()).hexdigest()
+        if url_hash in self.favorites:
+            del self.favorites[url_hash]
+            self.save()
+            return True
+        return False
+
+    def searchFavs(self, query, category=None):
+        favs = self.listFavs(category=category)
+        if not query: return favs
+        
+        clean_q = self.textProcessor.clean_text(query)
+        results = []
+        for fav_hash, fav_data in favs.items():
+            search_text = f"{fav_data.get('title','')} {fav_data.get('url','')} {fav_data.get('category', '')}"
+            if clean_q in self.textProcessor.clean_text(search_text):
+                results.append(fav_data)
+        return results
+
+    def listFavs(self, category=None):
+        all_favs = self.favorites
+        if category:
+            return {h: f for h, f in all_favs.items() if f.get('category') == category}
+        return all_favs
+        
+    def get_favorites(self, category=None):
+        all_favs = list(self.favorites.values())
+        if category:
+            return [f for f in all_favs if f.get('category') == category]
+        return all_favs
+
+    def get_stats(self):
+        fav_cats = defaultdict(int)
+        for fav in self.favorites.values():
+            fav_cats[fav['category']] += 1
+        
+        return {
+            "total_tabs": len(self.tabs),
+            "total_favorites": len(self.favorites),
+            "favorite_categories": dict(fav_cats)
+        }
+
+def print_favorites_list(favorites):
+    if not favorites:
+        print("No favorites found.")
+        return
+    
+    if isinstance(favorites, dict):
+        favorites = favorites.values()
+
+    fav_list = sorted(favorites, key=lambda x: x.get('added', datetime.min), reverse=True)
+    for fav in fav_list:
+        print(f"[{fav.get('category', 'general')}] {fav['title']} :: {fav['url']}")
+
+def main():
+    parser = argparse.ArgumentParser(description="A tool to organize files and manage web favorites.", add_help=False)
+    parser.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help='Show this help message and exit.')
+    subparsers = parser.add_subparsers(dest='command', help='Primary command', required=True)
+
+    org_parser = subparsers.add_parser('organize', help='Organize files in a directory.')
+    org_parser.add_argument('source', help='The directory to organize.')
+    org_parser.add_argument('target', help='The destination for organized files.')
+    org_parser.add_argument('--force-move', action='store_true', help='Set this flag to actually move files.')
+
+    train_parser = subparsers.add_parser('train', help='Train the file organizer model.')
+    train_parser.add_argument('dir', help='Directory with categorized subfolders of examples.')
+
+    fav_add = subparsers.add_parser('fav-add', help='Add a web favorite.')
+    fav_add.add_argument('url', help='URL of the favorite.')
+    fav_add.add_argument('title', help='Title for the favorite.')
+    fav_add.add_argument('--cat', default='general', help='Category for the favorite.')
+
+    fav_rm = subparsers.add_parser('fav-rm', help='Remove a web favorite.')
+    fav_rm.add_argument('url', help='URL to remove.')
+
+    fav_search = subparsers.add_parser('fav-search', help='Search favorites.')
+    fav_search.add_argument('query', help='Search term.')
+    fav_search.add_argument('--cat', help='Filter by category.')
+    
+    fav_list = subparsers.add_parser('fav-list', help='List all favorites.')
+    fav_list.add_argument('--cat', help='Filter by category.')
+    
+    tab_add = subparsers.add_parser('tab-add', help='Add a browser tab.')
+    tab_add.add_argument('url')
+    tab_add.add_argument('title')
+    
+    tab_close = subparsers.add_parser('tab-close', help='Close a tab by ID.')
+    tab_close.add_argument('id', type=int)
+    
+    tab_list = subparsers.add_parser('tab-list', help='List open tabs.')
+    
+    tab_search = subparsers.add_parser('tab-search', help='Search open tabs.')
+    tab_search.add_argument('query')
+
+    inactive = subparsers.add_parser('inactive-tabs', help='Find inactive tabs.')
+    inactive.add_argument('--mins', type=int, default=30)
+    
+    stats = subparsers.add_parser('stats', help='Show usage statistics.')
+    
+    args = parser.parse_args()
+    
+    command = args.command
+    if command == 'organize':
+        organizer = FileOrganizer()
+        organizer.do_organization(args.source, args.target, dry_run=not args.force_move)
+    elif command == 'train':
+        organizer = FileOrganizer()
+        organizer.run_training(args.dir)
+    elif command.startswith('fav-'):
+        manager = WebDataManager()
+        if command == 'fav-add':
+            manager.add_favorite(args.url, args.title, args.cat)
+        elif command == 'fav-rm':
+            manager.remove_favorite(args.url)
+        elif command == 'fav-search':
+            results = manager.searchFavs(args.query, args.cat)
+            print_favorites_list(results)
+        elif command == 'fav-list':
+            results = manager.listFavs(category=args.cat)
+            print_favorites_list(results)
+    elif command.startswith('tab-'):
+        manager = WebDataManager()
+        if command == 'tab-add':
+            manager.add_tab(args.url, args.title)
+        elif command == 'tab-close':
+            manager.close_tab(args.id)
+        elif command == 'tab-list':
+            for tid, tab in manager.tabs.items(): print(f"[{tid}] {tab['title']}")
+        elif command == 'tab-search':
+            results = manager.search_tabs(args.query)
+            for res in results: print(f"[{res['id']}] {res['title']} (Score: {res['score']:.2f})")
+    elif command == 'inactive-tabs':
+        manager = WebDataManager()
+        results = manager.find_inactive_tabs(args.mins)
+        for tab in results: print(f"[{tab['id']}] {tab['title']}")
+    elif command == 'stats':
+        org_stats = FileOrganizer().get_category_stats()
+        web_stats = WebDataManager().get_stats()
+        print("--- File Organizer Stats ---")
+        for cat, num in org_stats.items(): print(f"  {cat}: {num} files trained")
+        print("\n--- Web Manager Stats ---")
+        for key, val in web_stats.items(): print(f"  {key.replace('_',' ').title()}: {val}")
+
+if __name__ == "__main__":
+    main()
+
+
+
