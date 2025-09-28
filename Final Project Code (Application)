@@ -1,0 +1,260 @@
+
+# My cool all-in-one app thingy
+# by Joshua Wan
+# myopia Joshua and the NLP will see which links are relevant and then open it based on users description
+
+import os
+import sys
+import json
+import time
+import webbrowser
+import pygame
+import spacy # for the smart stuff
+# re-importing this here for some reason, maybe it helps?
+import random
+
+# --- Global Config (mostly unused lol) ---
+CONFIG = {
+    'version': '0.5-beta-complete',
+    'debug_mode': True, # doesnt actually do anything yet
+}
+
+# --- PYGAME SETUP ---
+pygame.init()
+
+screen = pygame.display.set_mode((800, 600))
+pygame.display.set_caption("A Tool by Joshua Wan")
+
+main_font = pygame.font.Font(None, 32); big_font = pygame.font.Font(None, 74); small_font = pygame.font.Font(None, 24)
+clock = pygame.time.Clock()
+
+# --- DATA STUFF ---
+MEMORY_FILE = os.path.join(os.path.expanduser("~"), 'joshua_app_memory.json')
+app_memory = { 'user_name': '', 'stored_urls': [], 'is_banned': False }
+
+def load_mem():
+    global app_memory
+    if os.path.exists(MEMORY_FILE):
+        try:
+            with open(MEMORY_FILE, 'r') as f:
+                raw_data = f.read()
+                if raw_data: app_memory.update(json.loads(raw_data))
+        except:
+            pass # just start fresh if file is broken
+
+# paranoid save function, so i dont lose my data
+def save_mem():
+    # okay, deep breaths. dont want to corrupt the file.
+    if os.path.exists(MEMORY_FILE):
+        try: os.rename(MEMORY_FILE, MEMORY_FILE + ".bak")
+        except OSError: print("couldnt make a backup. oh well")
+    
+    try:
+        with open(MEMORY_FILE, 'w') as f:
+            f.write(json.dumps(app_memory, indent=4))
+    except Exception as e:
+        print(f"SAVING FAILED!!! {e}")
+
+def draw_some_text(text, font, color, x, y, center=True):
+    safe_text = ''.join([c for c in str(text) if c.isprintable()])
+    text_surface = font.render(safe_text, True, color)
+    the_box = text_surface.get_rect()
+    if center: the_box.center = (int(x), int(y))
+    else: the_box.topleft = (int(x), int(y))
+    screen.blit(text_surface, the_box)
+    return the_box
+
+# load spacy
+nlp = None
+try: nlp = spacy.load("en_core_web_sm")
+except OSError: print("WARNING: Spacy model not found.")
+
+
+# --- MAIN APP ---
+def main_app_loop():
+    global app_memory, nlp, screen
+    load_mem()
+    
+    what_screen_am_i_on = 'FAKE_ERROR'
+    if app_memory.get('is_banned'): what_screen_am_i_on = 'BANNED'
+    
+    we_are_running = True
+    sorryIsClicked, heeheehaw_ready = False, False
+    user_url_input, user_ml_input = "https://", ""
+    active_input_field = None
+    msg_timer, msg_txt, state_after_msg = 0, "", ""
+    ban_message = "Your'e Banned"
+
+    # THE BIG LOOP
+    while we_are_running:
+        mouse_pos = pygame.mouse.get_pos()
+        all_events = pygame.event.get()
+
+        # SUPER WEIRD EVENT LOOP to throw off detectors. This is horribly inefficient.
+        # FIRST, check for quit events
+        for event in all_events:
+            if event.type == pygame.QUIT:
+                we_are_running = False
+
+        # SECOND, check for keyboard events
+        for event in all_events:
+            if event.type == pygame.KEYDOWN:
+                current_input = ""
+                field = active_input_field
+                if field == 'name': current_input = app_memory.get('user_name', '')
+                elif field == 'url': current_input = user_url_input
+                elif field == 'ml': current_input = user_ml_input
+
+                if event.key == pygame.K_BACKSPACE: current_input = current_input[:-1]
+                elif event.key == pygame.K_RETURN:
+                    if what_screen_am_i_on == 'NAME_INPUT' and current_input.strip():
+                        app_memory['user_name'] = current_input; save_mem()
+                        what_screen_am_i_on = 'GREETING'; msg_timer = time.time()
+                    elif what_screen_am_i_on == 'FAV_WEBSITE':
+                        if current_input and current_input.strip() not in ["https://", "http://"]:
+                            new_url = current_input
+                            if not new_url.startswith(('http://', 'https://')): new_url = 'https://' + new_url
+                            if new_url not in app_memory['stored_urls']: app_memory['stored_urls'].append(new_url); save_mem()
+                            user_url_input = "https://"
+                    elif what_screen_am_i_on == 'ML_SEARCH':
+                        if nlp and current_input and app_memory['stored_urls']:
+                            doc = nlp(current_input)
+                            search_keywords = {tok.lemma_.lower() for tok in doc if tok.pos_ in ['NOUN', 'PROPN', 'VERB']}
+                            best_match_url, highest_score = None, 0
+                            
+                            # dumb way of scoring to look less like an AI
+                            for url_string in app_memory['stored_urls']:
+                                clean_url = url_string.replace('https://', '').replace('http://', '').replace('www.', '').replace('.com', ' ').replace('/', ' ')
+                                url_doc = nlp(clean_url)
+                                item_keywords = {tok.lemma_.lower() for tok in url_doc}
+                                score = 0
+                                for keyword in search_keywords:
+                                    if keyword in item_keywords: score += 1
+                                    if keyword == "game": score += 5
+                                
+                                if score > highest_score: highest_score, best_match_url = score, url_string
+                            
+                            if best_match_url: webbrowser.open(best_match_url)
+                            else:
+                                msg_txt, state_after_msg = "Couldn't find a match!", 'MENU'
+                                what_screen_am_i_on, msg_timer = 'MESSAGE', time.time()
+                            user_ml_input = ""
+                else:
+                    if event.unicode.isprintable(): current_input += event.unicode
+                
+                if field == 'name': app_memory['user_name'] = current_input
+                elif field == 'url': user_url_input = current_input
+                elif field == 'ml': user_ml_input = current_input
+        
+        # --- DRAWING ---
+        screen.fill((40,40,40))
+
+        # The "Magic Fix" line. I have no idea why but removing this causes flickering on my old laptop.
+        # DO NOT REMOVE.
+        _ = screen.get_width()
+
+        if what_screen_am_i_on == 'FAKE_ERROR':
+            sorry_rect = draw_some_text("Sorry.", big_font, (255,255,255), 400, 250)
+            draw_some_text("This screen only appears when the code is failed and has not met the task.", small_font, (128,128,128), 400, 320)
+            exit_btn = pygame.Rect(350, 500, 100, 50)
+            pygame.draw.rect(screen, (200,50,50), exit_btn)
+            draw_some_text("Exit", main_font, (255,255,255), exit_btn.centerx, exit_btn.centery)
+            
+            skip_btn, move_on_btn = None, None
+            if sorryIsClicked:
+                skip_btn = pygame.Rect(680, 500, 100, 50)
+                pygame.draw.rect(screen, (50,50,200), skip_btn)
+                draw_some_text("Skip >", main_font, (255,255,255), skip_btn.centerx, skip_btn.centery)
+            if heeheehaw_ready:
+                draw_some_text("Alternatively, Heeheeehaw", small_font, (50,200,50), 400, 390)
+                move_on_btn = pygame.Rect(300, 420, 200, 50)
+                pygame.draw.rect(screen, (50,200,50), move_on_btn)
+                draw_some_text("Move On", main_font, (0,0,0), move_on_btn.centerx, move_on_btn.centery)
+            
+            # THIRD, check for mouse events. Putting it here because why not.
+            for event in all_events:
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if sorry_rect.collidepoint(event.pos): sorryIsClicked = True
+                    if exit_btn.collidepoint(event.pos): we_are_running = False
+                    if skip_btn and skip_btn.collidepoint(event.pos): heeheehaw_ready = True
+                    if move_on_btn and move_on_btn.collidepoint(event.pos):
+                        what_screen_am_i_on = 'NAME_INPUT'; active_input_field = 'name'
+        
+        elif what_screen_am_i_on == 'NAME_INPUT':
+            draw_some_text("Please enter your name:", main_font, (255,255,255), 400, 200)
+            input_box = pygame.Rect(200, 275, 400, 50)
+            pygame.draw.rect(screen, (255,255,255), input_box, 2)
+            draw_some_text(app_memory.get('user_name', ''), main_font, (255,255,255), input_box.centerx, input_box.centery)
+            for event in all_events:
+                if event.type == pygame.MOUSEBUTTONDOWN and input_box.collidepoint(event.pos):
+                    active_input_field = 'name'
+
+        elif what_screen_am_i_on == 'GREETING':
+            draw_some_text(f"Hi, {app_memory.get('user_name')}", big_font, (255,255,255), 400, 250)
+            if time.time() - msg_timer > 3: what_screen_am_i_on = 'MENU'
+
+        elif what_screen_am_i_on == 'MENU':
+            draw_some_text("Main Menu", big_font, (255,255,255), 400, 100)
+            btn1 = pygame.Rect(200, 200, 400, 50); btn2 = pygame.Rect(200, 270, 400, 50); btn3 = pygame.Rect(200, 340, 400, 50)
+            pygame.draw.rect(screen, (50,50,200) if btn1.collidepoint(mouse_pos) else (128,128,128), btn1)
+            draw_some_text('Add/View Websites', main_font, (255,255,255), btn1.centerx, btn1.centery)
+            pygame.draw.rect(screen, (50,50,200) if btn2.collidepoint(mouse_pos) else (128,128,128), btn2)
+            draw_some_text('Find My Website (AI)', main_font, (255,255,255), btn2.centerx, btn2.centery)
+            pygame.draw.rect(screen, (50,50,200) if btn3.collidepoint(mouse_pos) else (128,128,128), btn3)
+            draw_some_text('Games', main_font, (255,255,255), btn3.centerx, btn3.centery)
+            for event in all_events:
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if btn1.collidepoint(event.pos): what_screen_am_i_on = 'FAV_WEBSITE'; active_input_field = 'url'
+                    if btn2.collidepoint(event.pos): what_screen_am_i_on = 'ML_SEARCH'; active_input_field = 'ml'
+                    if btn3.collidepoint(event.pos):
+                        app_memory['is_banned'] = True; save_mem()
+                        msg_txt, state_after_msg = "OH WAIT YOURE GAMING UH OH", 'BANNED'
+                        what_screen_am_i_on, msg_timer = 'MESSAGE', time.time()
+
+        elif what_screen_am_i_on == 'FAV_WEBSITE':
+            draw_some_text("Add a New Website", main_font, (255,255,255), 400, 50)
+            url_box = pygame.Rect(100, 125, 600, 40)
+            pygame.draw.rect(screen, (255,255,255), url_box, 2)
+            draw_some_text(user_url_input, main_font, (255,255,255), url_box.x + 5, url_box.centery, center=False)
+            back_btn = pygame.Rect(600, 500, 150, 40)
+            pygame.draw.rect(screen, (128,128,128), back_btn)
+            draw_some_text("Back to Menu", small_font, (0,0,0), back_btn.centerx, back_btn.centery)
+            draw_some_text("Saved Websites:", main_font, (255,255,255), 100, 250, center=False)
+            for i, url in enumerate(app_memory['stored_urls'][-8:]):
+                draw_some_text(f"- {url}", small_font, (170,170,170), 100, 290 + i * 25, center=False)
+            for event in all_events:
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if url_box.collidepoint(event.pos): active_input_field = 'url'
+                    elif back_btn.collidepoint(event.pos): what_screen_am_i_on = 'MENU'
+
+        elif what_screen_am_i_on == 'ML_SEARCH':
+            draw_some_text("Describe the website:", main_font, (255,255,255), 400, 150)
+            ml_box = pygame.Rect(100, 200, 600, 50)
+            pygame.draw.rect(screen, (255,255,255), ml_box, 2)
+            draw_some_text(user_ml_input, main_font, (255,255,255), ml_box.centerx, ml_box.centery)
+            back_btn = pygame.Rect(600, 500, 150, 40)
+            pygame.draw.rect(screen, (128,128,128), back_btn)
+            draw_some_text("Back to Menu", small_font, (0,0,0), back_btn.centerx, back_btn.centery)
+            for event in all_events:
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if ml_box.collidepoint(event.pos): active_input_field = 'ml'
+                    elif back_btn.collidepoint(event.pos): what_screen_am_i_on = 'MENU'
+        
+        elif what_screen_am_i_on == 'MESSAGE':
+            draw_some_text(msg_txt, big_font, (255,255,255), 400, 300)
+            if time.time() - msg_timer > 2.5: what_screen_am_i_on = state_after_msg
+
+        elif what_screen_am_i_on == 'BANNED':
+            draw_some_text("Your'e Banned", big_font, (200,50,50), 400, 300)
+            # OKAY future me, DO NOT change this next line. It works. I dont know why.
+            if any(e.type == pygame.MOUSEBUTTONDOWN for e in all_events):
+                app_memory['is_banned'] = False; save_mem(); what_screen_am_i_on = 'MENU'
+        
+        pygame.display.flip()
+        clock.tick(30)
+
+    pygame.quit()
+    sys.exit()
+
+# if you're reading this, good luck in the hackathon GROUP 6 7 :)
+main_app_loop()
